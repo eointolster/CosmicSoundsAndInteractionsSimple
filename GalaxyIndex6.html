@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cosmic Wave Interaction Simulator</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            max-width: 500px;
+            aspect-ratio: 9 / 16;
+            margin: auto;
+            position: relative;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="cosmicCanvas"></canvas>
+    </div>
+    <script>
+        const canvas = document.getElementById('cosmicCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+
+        const stars = [];
+        const gravitationalSources = [];
+        const starCount = 1000;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const notes = [
+            { name: 'C', frequency: 261.63, color: '#FF0000' },
+            { name: 'D', frequency: 293.66, color: '#FFA500' },
+            { name: 'E', frequency: 329.63, color: '#FFFF00' },
+            { name: 'F', frequency: 349.23, color: '#00FF00' },
+            { name: 'G', frequency: 392.00, color: '#00FFFF' },
+            { name: 'A', frequency: 440.00, color: '#0000FF' },
+            { name: 'B', frequency: 493.88, color: '#8A2BE2' }
+        ];
+
+        class Star {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.size = Math.random() * 2 + 1;
+                this.color = `hsl(${Math.random() * 60 + 180}, 100%, 70%)`;
+                this.baseX = this.x;
+                this.baseY = this.y;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            update(gravitationalSources) {
+                let dx = 0;
+                let dy = 0;
+                gravitationalSources.forEach(source => {
+                    source.waves.forEach(wave => {
+                        const distX = this.baseX - source.x;
+                        const distY = this.baseY - source.y;
+                        const dist = Math.sqrt(distX * distX + distY * distY);
+                        const angle = Math.atan2(distY, distX);
+                        const waveEffect = Math.sin((dist - wave.radius) * 0.1) * 2;
+                        const falloff = Math.max(0, 1 - dist / (canvas.width * 0.5));
+                        dx += Math.cos(angle) * waveEffect * falloff;
+                        dy += Math.sin(angle) * waveEffect * falloff;
+                    });
+                });
+                this.x = this.baseX + dx;
+                this.y = this.baseY + dy;
+            }
+        }
+
+        class GravitationalSource {
+            constructor(x, y, note) {
+                this.x = x;
+                this.y = y;
+                this.note = note;
+                this.waves = [];
+                this.lastWaveTime = 0;
+                this.frequency = 0.5; // Waves per second
+                this.maxWaveDuration = 10000; // 10 seconds
+                this.playSound();
+            }
+
+            update(time) {
+                if (time - this.lastWaveTime > 1000 / this.frequency) {
+                    this.waves.push({ radius: 0, opacity: 1, startTime: time });
+                    this.lastWaveTime = time;
+                }
+
+                this.waves.forEach(wave => {
+                    wave.radius += 0.5; // Slower wave speed
+                    wave.opacity = 1 - (wave.radius / (Math.max(canvas.width, canvas.height) * 0.75));
+                });
+
+                this.waves = this.waves.filter(wave => wave.opacity > 0 && time - wave.startTime < this.maxWaveDuration);
+            }
+
+            draw() {
+                this.waves.forEach(wave => {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, wave.radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `${this.note.color}${Math.floor(wave.opacity * 255).toString(16).padStart(2, '0')}`;
+                    ctx.lineWidth = 3; // Thicker lines for visibility
+                    ctx.stroke();
+                });
+            }
+
+            playSound() {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(this.note.frequency, audioCtx.currentTime);
+                
+                gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 4);
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 4);
+            }
+        }
+
+        function createStars() {
+            for (let i = 0; i < starCount; i++) {
+                stars.push(new Star());
+            }
+        }
+
+        function calculateWaveInteractions(x, y) {
+            let interactionStrength = 0;
+            gravitationalSources.forEach(source => {
+                source.waves.forEach(wave => {
+                    const dx = x - source.x;
+                    const dy = y - source.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const waveDifference = Math.abs(distance - wave.radius);
+                    if (waveDifference < 5) {
+                        interactionStrength += wave.opacity * (1 - waveDifference / 5);
+                    }
+                });
+            });
+            return interactionStrength;
+        }
+
+        function animate(time) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            gravitationalSources.forEach(source => {
+                source.update(time);
+                source.draw();
+            });
+
+            stars.forEach(star => {
+                star.update(gravitationalSources);
+                star.draw();
+            });
+
+            // Visualize wave interactions
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            for (let x = 0; x < canvas.width; x += 2) {
+                for (let y = 0; y < canvas.height; y += 2) {
+                    const interactionStrength = calculateWaveInteractions(x, y);
+                    if (interactionStrength > 0) {
+                        const index = (y * canvas.width + x) * 4;
+                        data[index] = 255; // Red
+                        data[index + 1] = 255; // Green
+                        data[index + 2] = 255; // Blue
+                        data[index + 3] = Math.min(255, interactionStrength * 255); // Alpha
+                    }
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            requestAnimationFrame(animate);
+        }
+
+        canvas.addEventListener('click', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            const noteIndex = Math.floor((y / canvas.height) * notes.length);
+            const note = notes[noteIndex];
+            gravitationalSources.push(new GravitationalSource(x, y, note));
+        });
+
+        createStars();
+        animate(0);
+    </script>
+</body>
+</html>
